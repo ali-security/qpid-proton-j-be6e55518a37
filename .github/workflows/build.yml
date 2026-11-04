@@ -1,10 +1,17 @@
 name: "Build"
 
-on: [push, pull_request, workflow_dispatch]
+on:
+  workflow_dispatch:
+    inputs:
+      test-filter:
+        description: "Optional surefire -Dtest pattern; empty runs the full suite"
+        required: false
+        default: ""
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -12,7 +19,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         with:
           path: ~/.m2/repository
           key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
@@ -26,4 +33,103 @@ jobs:
           distribution: 'temurin'
 
       - name: Build
-        run: mvn -B clean verify
+        env:
+          TEST_FILTER: ${{ inputs.test-filter }}
+        run: |
+          if [ -n "$TEST_FILTER" ]; then
+            mvn -B clean verify -Dtest="$TEST_FILTER" -Dsurefire.failIfNoSpecifiedTests=false -DfailIfNoTests=false
+          else
+            mvn -B clean verify
+          fi
+
+      - name: Report skipped tests
+        if: always()
+        shell: python3 {0}
+        run: |
+          import glob, re, os
+          import xml.etree.ElementTree as ET
+
+          def jython_reason(classname, method):
+              # Jython proton_tests write <skipped/> with no message; resolve the reason from the test source.
+              mod = classname.split(".")
+              if len(mod) < 2 or mod[0] != "proton_tests":
+                  return None
+              path = os.path.join("tests", "python", "proton_tests", mod[1] + ".py")
+              if not os.path.exists(path):
+                  return None
+              lines = open(path).read().split("\n")
+              start = None
+              for i, l in enumerate(lines):
+                  if re.match(r"\s*def\s+%s\s*\(" % re.escape(method), l):
+                      start = i
+                      break
+              if start is None:
+                  return None
+              indent = len(lines[start]) - len(lines[start].lstrip())
+              body = []
+              for l in lines[start + 1:]:
+                  if l.strip() and (len(l) - len(l.lstrip())) <= indent:
+                      break
+                  body.append(l)
+              for j, l in enumerate(body):
+                  m = re.search(r"raise\s+Skipped\((.*)\)", l)
+                  if m:
+                      cond = ""
+                      for k in range(j - 1, -1, -1):
+                          if body[k].strip().startswith("if "):
+                              cond = body[k].strip()
+                              break
+                      msg = m.group(1).strip().strip("'\"")
+                      if not msg and "java" in cond:
+                          msg = "test not supported on Proton-J/Jython (guard: %s)" % cond
+                      elif cond:
+                          msg = "%s (guard: %s)" % (msg, cond)
+                      return "%s:%d: %s" % (path, start + 1, msg)
+              return None
+
+          def java_ignore_reason(classname):
+              # A class-level @Ignore without a message: report the annotation and the class javadoc.
+              rel = classname.replace(".", "/") + ".java"
+              for path in glob.glob("**/" + rel, recursive=True):
+                  src = open(path).read()
+                  m = re.search(r"(/\*\*(?:(?!\*/).)*\*/)?\s*@Ignore\s*\n\s*public\s+class", src, re.S)
+                  if m:
+                      doc = " ".join(l.strip(" */") for l in (m.group(1) or "").split("\n")).strip()
+                      return "%s: class-level @Ignore in source (javadoc: %s)" % (path, doc or "none")
+              return None
+
+          total = 0
+          for f in sorted(glob.glob("**/target/surefire-reports/*.xml", recursive=True)):
+              try:
+                  root = ET.parse(f).getroot()
+              except Exception as e:
+                  print("could not parse %s: %s" % (f, e))
+                  continue
+              for tc in root.iter("testcase"):
+                  sk = tc.find("skipped")
+                  if sk is None:
+                      continue
+                  total += 1
+                  cls = tc.get("classname", "")
+                  name = tc.get("name", "")
+                  reason = (sk.get("message") or (sk.text or "")).strip()
+                  if not reason:
+                      reason = jython_reason(cls, name) or java_ignore_reason(cls) or "(no message recorded)"
+                  print("SKIPPED %s.%s -- %s" % (cls, name, reason))
+          print("Total skipped testcases: %d" % total)
+          ign = os.path.join("tests", "java", "pythonTests.ignore")
+          if os.path.exists(ign):
+              print("Jython tests ignored via %s (upstream ignore list, reported by the runner as 'ignored'):" % ign)
+              print(open(ign).read())
+
+      - name: Upload proton-j jar
+        if: matrix.java == 8
+        uses: actions/upload-artifact@v4
+        with:
+          name: proton-j-jar
+          path: |
+            proton-j/target/proton-j-*.jar
+            !proton-j/target/proton-j-*-sources.jar
+            !proton-j/target/proton-j-*-javadoc.jar
+            !proton-j/target/proton-j-*-tests.jar
+          if-no-files-found: error
