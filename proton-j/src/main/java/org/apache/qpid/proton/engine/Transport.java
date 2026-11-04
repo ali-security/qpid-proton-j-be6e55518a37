@@ -327,4 +327,17 @@ public interface Transport extends Endpoint
     void setOutboundFrameSizeLimit(int size);
 
     int getOutboundFrameSizeLimit();
+
+    /**
+     * Set an upper bound on the number of transfer frames per incoming delivery that
+     * are permitted. Defaults to 65535. 0 means no limit.
+     *
+     * Sealed non-breaking backport: default methods (not abstract) so third-party Transport
+     * implementers keep compiling; TransportImpl overrides them with the real CVE-2026-66257 cap.
+     *
+     * @param maxTransfersPerDelivery the max number of transfers per delivery
+     */
+    default void setMaxTransfersPerDelivery(int maxTransfersPerDelivery) { }
+
+    default int getMaxTransfersPerDelivery() { return 65535; }
 }

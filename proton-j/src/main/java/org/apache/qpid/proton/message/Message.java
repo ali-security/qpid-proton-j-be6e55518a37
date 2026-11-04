@@ -169,6 +169,13 @@ public interface Message
      */
     int decode(byte[] data, int offset, int length);
 
+    // Sealed non-breaking backport: default methods (not abstract) so third-party Message implementers
+    // keep compiling; MessageImpl overrides them to honour the supplied options. The plain no-option
+    // decode path already enforces the CVE limits via the default MessageDecodeOptions.
+    default int decode(byte[] data, int offset, int length, MessageDecodeOptions options) {
+        return decode(data, offset, length);
+    }
+
     /**
      * Decodes the Message from the given {@link ReadableBuffer}.
      * <p>
@@ -180,6 +187,10 @@ public interface Message
      *      A {@link ReadableBuffer} that contains the complete message bytes.
      */
     void decode(ReadableBuffer buffer);
+
+    default void decode(ReadableBuffer buffer, MessageDecodeOptions options) {
+        decode(buffer);
+    }
 
     /**
      * Encodes up to {@code length} bytes of the message into the provided byte array,

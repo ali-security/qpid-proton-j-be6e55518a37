@@ -27,13 +27,20 @@ public class CodecTestSupport {
 
     public static final int DEFAULT_MAX_BUFFER = 256 * 1024;
 
-    final DecoderImpl decoder = new DecoderImpl();
-    final EncoderImpl encoder = new EncoderImpl(decoder);
+    protected DecoderImpl decoder;
+    protected EncoderImpl encoder;
 
-    ByteBuffer buffer;
+    protected ByteBuffer buffer;
 
     @Before
     public void setUp() {
+        decoder = new DecoderImpl();
+        // Sealed non-breaking backport: the shipped default zeroWidthElementLimit was raised from 0
+        // to 65535, but these codec tests validate the limit *mechanism* (that a count over the limit
+        // is rejected), which is cleanest to exercise at 0 — the value they were written against.
+        // Pin the test decoder to 0 so the negative cases still reject; positive cases set their own.
+        decoder.setZeroWidthArrayElementLimit(0);
+        encoder = new EncoderImpl(decoder);
         AMQPDefinedTypes.registerAllTypes(decoder, encoder);
 
         buffer = ByteBuffer.allocate(getMaxBufferSize());

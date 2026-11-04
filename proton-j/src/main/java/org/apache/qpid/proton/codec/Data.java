@@ -161,4 +161,9 @@ public interface Data
     DescribedType getDescribedType();
 
     String format();
+
+    // Sealed non-breaking backport: default methods (not abstract) so third-party Data implementers
+    // keep compiling; DataImpl overrides them with the real zero-width-element guard.
+    default int getZeroWidthElementLimit() { return 65535; }
+    default void setZeroWidthElementLimit(int zeroWidthElementLimit) { }
 }

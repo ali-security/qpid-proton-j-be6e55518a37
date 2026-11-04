@@ -143,6 +143,18 @@ public interface Decoder
     Object readObject();
     Object readObject(Object defaultValue);
 
+    // Sealed non-breaking backport: upstream 0.35.0 added these as ABSTRACT methods, which forces every
+    // third-party Decoder implementer to implement them or stop compiling. Declared here as Java-8
+    // default methods instead, so existing implementers keep compiling; DecoderImpl overrides them with
+    // the real CVE-2026-66273/CVE-2026-66274 guard logic.
+    default int getZeroWidthArrayElementLimit() { return 65535; }
+
+    default void setZeroWidthArrayElementLimit(int zeroWidthElementLimit) { }
+
+    default int getMaxDecodeDepth() { return 32; }
+
+    default void setMaxDecodeDepth(int maxDecodeDepth) { }
+
     void register(final Object descriptor, final DescribedTypeConstructor dtc);
 
     void register(final Object descriptor, final FastPathDescribedTypeConstructor<?> dtc);
